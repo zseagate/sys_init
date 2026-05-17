@@ -4,8 +4,8 @@
 
 ### 1.1 脚本信息
 1. **脚本名称**：`sys_init.sh`
-2. **版本号**：V1.1
-3. **更新日期**：2026-5-16
+2. **版本号**：V2.0
+3. **更新日期**：2026-5-17
 4. **支持系统**：Debian 10+、Ubuntu 20.04+、MX Linux、Linux Mint、Lubuntu、Xubuntu、PeppermintOS、Zorin
 5. **支持架构**：x86/i386（32位）、x86_64/amd64（64位）
 
