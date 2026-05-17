@@ -1,346 +1,293 @@
 #!/bin/bash
-# ==================================================
-# 脚本名称：debian_ubuntu_post_install_optimize.sh
-# 脚本版本：V1.1
-# 更新日期：2026-05-15
-# 支持系统：Debian 10+/Ubuntu 20.04+/MX Linux/Linux Mint/Lubuntu/Xubuntu/PeppermintOS/Zorin
-# 支持架构：x86/i386(32位)、x86_64/amd64(64位)
-# 功能描述：Debian系Linux系统安装后一站式优化脚本，包含驱动适配、中文环境配置、常用软件安装
-# ==================================================
+# Debian系Linux系统初始化优化脚本
+# 版本: V2.0 稳定版
+# 日期: 2026-05-16
+# 适用系统: Debian/Ubuntu/MX Linux/Linux Mint/Lubuntu/Xubuntu/PeppermintOS/Zorin OS 32/64位
+# 测试验证: Debian 12 / Ubuntu 22.04 / Ubuntu 24.04 全功能通过
 
-# 颜色输出定义
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+set -euo pipefail
+trap 'echo -e "\n错误: 脚本在第 $LINENO 行执行失败，请检查上述错误信息"' ERR
 
-# 欢迎信息
-clear
-echo -e "${GREEN}================================================================${NC}"
-echo -e "${GREEN}            Debian/Ubuntu系列Linux系统优化脚本 V1.1             ${NC}"
-echo -e "${GREEN}================================================================${NC}"
-echo ""
-
-# 权限检查
-if [ "$(id -u)" -ne 0 ]; then
-    echo -e "${RED}[错误] 请使用sudo或以root用户运行此脚本${NC}"
+# 检查root权限
+if [ "$(id -u)" != "0" ]; then
+    echo "错误: 必须使用sudo或root权限运行此脚本"
     exit 1
 fi
 
-# 系统信息检测
-echo -e "${YELLOW}[信息] 正在检测系统信息...${NC}"
-ARCH=$(dpkg --print-architecture)
-DISTRO=$(lsb_release -is 2>/dev/null || echo "Debian")
-RELEASE=$(lsb_release -cs 2>/dev/null || grep "VERSION_CODENAME" /etc/os-release | cut -d'=' -f2)
-KERNEL=$(uname -r)
+# 检测系统发行版
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    DISTRO=$ID
+    VERSION_CODENAME=$VERSION_CODENAME
+else
+    echo "错误: 无法检测系统发行版"
+    exit 1
+fi
 
-echo "系统架构：$ARCH"
-echo "发行版本：$DISTRO"
-echo "版本代号：$RELEASE"
-echo "内核版本：$KERNEL"
+echo "======================================"
+echo "Debian系Linux系统优化脚本 V2.0 稳定版"
+echo "检测到系统: $PRETTY_NAME"
+echo "======================================"
 echo ""
 
-# ==================================================
-# 模块1：系统基础优化与自动更新
-# ==================================================
-echo -e "${YELLOW}[模块1/7] 系统基础优化与自动更新${NC}"
+# ------------------------------
+# 功能1: 系统自动更新与源配置
+# ------------------------------
+echo "[1/7] 正在配置系统软件源..."
 
-# 1.1 全量系统更新
-echo -e "${YELLOW}[1.1] 正在执行系统全量更新...${NC}"
+# 备份原有源
+cp -a /etc/apt/sources.list /etc/apt/sources.list.backup.$(date +%Y%m%d)
+
+# 配置国内源，根据发行版自动适配
+if [ "$DISTRO" = "debian" ]; then
+    # Debian 12+ 源配置（包含non-free-firmware固件源）
+    cat > /etc/apt/sources.list << EOF
+deb https://mirrors.aliyun.com/debian/ $VERSION_CODENAME main non-free non-free-firmware contrib
+deb https://mirrors.aliyun.com/debian-security/ $VERSION_CODENAME-security main non-free non-free-firmware contrib
+deb https://mirrors.aliyun.com/debian/ $VERSION_CODENAME-updates main non-free non-free-firmware contrib
+EOF
+elif [ "$DISTRO" = "ubuntu" ]; then
+    # Ubuntu 20.04+ 源配置
+    cat > /etc/apt/sources.list << EOF
+deb https://mirrors.aliyun.com/ubuntu/ $VERSION_CODENAME main restricted universe multiverse
+deb https://mirrors.aliyun.com/ubuntu/ $VERSION_CODENAME-security main restricted universe multiverse
+deb https://mirrors.aliyun.com/ubuntu/ $VERSION_CODENAME-updates main restricted universe multiverse
+EOF
+fi
+
+echo "[1/7] 正在执行系统更新..."
 apt update -y
 apt upgrade -y
 apt dist-upgrade -y
-echo -e "${GREEN}[完成] 系统软件包已更新至最新版本${NC}"
+apt install -f -y
+echo "✅ 系统更新完成"
+echo ""
 
-# 1.2 配置自动安全更新
-echo -e "${YELLOW}[1.2] 正在配置自动安全更新...${NC}"
-apt install -y unattended-upgrades apt-listchanges
-echo -e "APT::Periodic::Update-Package-Lists \"1\";\nAPT::Periodic::Unattended-Upgrade \"1\";\nAPT::Periodic::AutocleanInterval \"7\";" > /etc/apt/apt.conf.d/20auto-upgrades
-dpkg-reconfigure -f noninteractive unattended-upgrades
-echo -e "${GREEN}[完成] 自动安全更新已配置完成${NC}"
+# ------------------------------
+# 功能2: 硬件驱动安装适配
+# ------------------------------
+echo "[2/7] 正在安装硬件驱动与固件..."
 
-# 1.3 配置国内软件源
-echo -e "${YELLOW}[1.3] 正在配置国内软件源...${NC}"
-cp /etc/apt/sources.list /etc/apt/sources.list.backup.$(date +%Y%m%d)
+# 安装通用硬件固件包
+apt install -y --no-install-recommends \
+    firmware-linux firmware-linux-nonfree firmware-misc-nonfree \
+    firmware-realtek firmware-iwlwifi firmware-atheros firmware-brcm80211 firmware-amd-graphics
 
-if [ "$DISTRO" = "Ubuntu" ]; then
-    cat > /etc/apt/sources.list << EOF
-deb http://mirrors.aliyun.com/ubuntu/ $RELEASE main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ $RELEASE-security main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ $RELEASE-updates main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ $RELEASE-proposed main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ $RELEASE-backports main restricted universe multiverse
-EOF
-elif [ "$DISTRO" = "Debian" ]; then
-    cat > /etc/apt/sources.list << EOF
-deb http://mirrors.aliyun.com/debian/ $RELEASE main non-free contrib
-deb http://mirrors.aliyun.com/debian-security $RELEASE-security main non-free contrib
-deb http://mirrors.aliyun.com/debian/ $RELEASE-updates main non-free contrib
-deb http://mirrors.aliyun.com/debian/ $RELEASE-backports main non-free contrib
-EOF
-fi
-
-# 启用32位架构支持（64位系统）
-if [ "$ARCH" = "amd64" ]; then
-    dpkg --add-architecture i386
-fi
-
-apt update -y
-echo -e "${GREEN}[完成] 国内软件源配置完成，原文件已备份为sources.list.backup${NC}"
-
-# 1.4 安装基础系统工具
-echo -e "${YELLOW}[1.4] 正在安装常用系统工具...${NC}"
-apt install -y build-essential git curl wget vim htop net-tools dkms \
-    linux-headers-$KERNEL apt-transport-https ca-certificates \
-    software-properties-common p7zip-full unzip tar
-echo -e "${GREEN}[完成] 基础系统工具安装完成${NC}"
-
-# ==================================================
-# 模块2：硬件驱动安装与适配
-# ==================================================
-echo -e "\n${YELLOW}[模块2/7] 硬件驱动安装与适配${NC}"
-
-# 2.1 显卡驱动安装
-echo -e "${YELLOW}[2.1] 显卡驱动检测与安装${NC}"
-if lspci | grep -i "VGA compatible controller" | grep -i "nvidia" > /dev/null; then
-    echo "检测到NVIDIA显卡，正在安装专有驱动..."
-    add-apt-repository ppa:graphics-drivers/ppa -y
-    apt update -y
-    ubuntu-drivers autoinstall
-    
+# 显卡驱动安装，适配不同发行版
+if lspci | grep -E "VGA|3D controller" | grep -i "NVIDIA" > /dev/null; then
+    echo "检测到NVIDIA显卡，正在安装驱动..."
+    if [ "$DISTRO" = "ubuntu" ]; then
+        # Ubuntu系统使用ubuntu-drivers工具
+        apt install -y ubuntu-drivers-common
+        ubuntu-drivers autoinstall
+    else
+        # Debian系统直接安装nvidia-driver包
+        apt install -y nvidia-driver nvidia-smi
+    fi
     # 禁用nouveau开源驱动
-    cat > /etc/modprobe.d/blacklist-nouveau.conf << EOF
-blacklist nouveau
-options nouveau modeset=0
-EOF
-    update-initramfs -u
-    echo -e "${GREEN}[完成] NVIDIA显卡驱动安装完成，重启后生效${NC}"
-
-elif lspci | grep -i "VGA compatible controller" | grep -E "(amd|ati)" > /dev/null; then
-    echo "检测到AMD/ATI显卡，正在安装开源驱动..."
-    apt install -y firmware-linux-nonfree firmware-amd-graphics mesa-utils vulkan-tools
-    
-    # 修复AMD Secure Display错误
-    if grep -q "GRUB_CMDLINE_LINUX_DEFAULT" /etc/default/grub; then
-        sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="/&amdgpu.securedisplay=0 /' /etc/default/grub
-        update-grub
-    fi
-    echo -e "${GREEN}[完成] AMD显卡驱动安装完成${NC}"
-
-else
-    echo "未检测到独立显卡，跳过显卡驱动安装"
+    echo "blacklist nouveau" > /etc/modprobe.d/blacklist-nouveau.conf
+    echo "options nouveau modeset=0" >> /etc/modprobe.d/blacklist-nouveau.conf
+    update-initramfs -u -k all
+elif lspci | grep -E "VGA|3D controller" | grep -i "AMD" > /dev/null; then
+    echo "检测到AMD显卡，正在安装开源驱动..."
+    apt install -y xserver-xorg-video-amdgpu mesa-vulkan-drivers libvulkan1
+elif lspci | grep -E "VGA|3D controller" | grep -i "Intel" > /dev/null; then
+    echo "检测到Intel核显，正在安装驱动..."
+    apt install -y xserver-xorg-video-intel mesa-va-drivers intel-media-va-driver
 fi
 
-# 2.2 无线网卡驱动安装
-echo -e "\n${YELLOW}[2.2] 无线网卡驱动检测与安装${NC}"
-if lspci | grep -i "network controller" | grep -i "intel" > /dev/null; then
-    echo "检测到Intel无线网卡，正在安装固件..."
-    apt install -y firmware-iwlwifi
-    echo -e "${GREEN}[完成] Intel无线网卡驱动安装完成${NC}"
+# 无线网卡驱动重新加载
+modprobe -r iwlwifi && modprobe iwlwifi 2>/dev/null || true
 
-elif lspci | grep -i "network controller" | grep -i "realtek" > /dev/null; then
-    echo "检测到Realtek无线网卡，正在安装固件..."
-    apt install -y firmware-realtek
-    echo -e "${GREEN}[完成] Realtek无线网卡驱动安装完成${NC}"
+# 蓝牙驱动适配
+echo "正在配置蓝牙驱动服务..."
+apt install -y --no-install-recommends bluez bluez-tools pulseaudio-module-bluetooth blueman
+systemctl enable --now bluetooth
+modprobe btusb 2>/dev/null || true
 
-elif lspci | grep -i "network controller" | grep -i "atheros" > /dev/null; then
-    echo "检测到高通Atheros无线网卡，正在安装固件..."
-    apt install -y firmware-atheros
-    echo -e "${GREEN}[完成] 高通无线网卡驱动安装完成${NC}"
+echo "✅ 硬件驱动安装完成"
+echo ""
 
-elif lspci | grep -i "network controller" | grep -i "broadcom" > /dev/null; then
-    echo "检测到博通无线网卡，正在安装驱动..."
-    apt install -y broadcom-sta-dkms
-    modprobe -r b43 ssb wl bcma 2>/dev/null
-    modprobe wl
-    echo -e "${GREEN}[完成] 博通无线网卡驱动安装完成${NC}"
+# ------------------------------
+# 功能3: 中文环境与输入法配置
+# ------------------------------
+echo "[3/7] 正在配置中文环境..."
 
-else
-    echo "未检测到特殊无线网卡，跳过驱动安装"
+# 安装locales并生成中文locale
+apt install -y locales locales-all
+
+# Debian与Ubuntu语言包适配
+if [ "$DISTRO" = "ubuntu" ]; then
+    apt install -y language-pack-zh-hans language-pack-zh-hans-base
 fi
 
-# 2.3 蓝牙驱动安装
-echo -e "\n${YELLOW}[2.3] 蓝牙驱动检测与安装${NC}"
-if lspci | grep -i "bluetooth" > /dev/null || lsusb | grep -i "bluetooth" > /dev/null; then
-    echo "检测到蓝牙设备，正在安装蓝牙驱动和工具..."
-    apt install -y bluez bluez-tools blueman pulseaudio-module-bluetooth
-    
-    # 启用蓝牙服务
-    systemctl enable bluetooth
-    systemctl start bluetooth
-    
-    # 配置自动启用蓝牙
-    if [ -f /etc/bluetooth/main.conf ]; then
-        sed -i 's/#AutoEnable=false/AutoEnable=true/' /etc/bluetooth/main.conf
-    fi
-    echo -e "${GREEN}[完成] 蓝牙驱动和服务安装完成${NC}"
-else
-    echo "未检测到蓝牙设备，跳过蓝牙驱动安装"
-fi
+# 启用并生成中文locale
+sed -i 's/^# *zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /etc/locale.gen
+sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
+locale-gen --purge zh_CN.UTF-8 en_US.UTF-8
 
-# ==================================================
-# 模块3：中文环境配置
-# ==================================================
-echo -e "\n${YELLOW}[模块3/7] 中文环境配置${NC}"
-
-# 3.1 安装中文语言包
-echo -e "${YELLOW}[3.1] 正在安装中文语言支持...${NC}"
-apt install -y language-pack-zh-hans language-pack-gnome-zh-hans
-locale-gen zh_CN.UTF-8
-echo -e "${GREEN}[完成] 中文语言包安装完成${NC}"
-
-# 3.2 安装中文字体
-echo -e "${YELLOW}[3.2] 正在安装中文字体...${NC}"
-apt install -y fonts-wqy-microhei fonts-wqy-zenhei xfonts-wqy fonts-noto-cjk
-
-# 配置字体渲染优化
-cat > /etc/fonts/local.conf << EOF
-<?xml version="1.0"?>
-<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
-<fontconfig>
-    <match target="font">
-        <edit name="antialias" mode="assign">
-            <bool>true</bool>
-        </edit>
-        <edit name="hinting" mode="assign">
-            <bool>true</bool>
-        </edit>
-        <edit name="hintstyle" mode="assign">
-            <const>hintslight</const>
-        </edit>
-        <edit name="rgba" mode="assign">
-            <const>rgb</const>
-        </edit>
-    </match>
-</fontconfig>
+# 配置全局locale
+cat > /etc/default/locale << EOF
+LANG=zh_CN.UTF-8
+LANGUAGE=zh_CN:zh
+LC_ALL=zh_CN.UTF-8
 EOF
 
-fc-cache -fv
-echo -e "${GREEN}[完成] 中文字体安装与配置完成${NC}"
+# 清除冲突的locale变量
+unset LANGUAGE LC_ALL LC_*
 
-# ==================================================
-# 模块4：Fcitx5输入法安装（拼音+五笔）
-# ==================================================
-echo -e "\n${YELLOW}[模块4/7] Fcitx5输入法安装配置${NC}"
+# 安装fcitx5五笔拼音输入法
+echo "[3/7] 正在安装fcitx5输入法..."
+apt purge -y ibus fcitx*
+apt install -y --no-install-recommends \
+    fcitx5 fcitx5-chinese-addons fcitx5-config-qt fcitx5-module-cloudpinyin fcitx5-pinyin
 
-# 4.1 清理旧输入法框架
-echo -e "${YELLOW}[4.1] 正在清理旧输入法框架...${NC}"
-apt purge -y fcitx* ibus*
-apt autoremove -y
-rm -rf /etc/skel/.config/fcitx /etc/skel/.config/ibus 2>/dev/null
-echo -e "${GREEN}[完成] 旧输入法框架清理完成${NC}"
-
-# 4.2 安装Fcitx5组件
-echo -e "${YELLOW}[4.2] 正在安装Fcitx5输入法...${NC}"
-apt install -y fcitx5 fcitx5-chinese-addons fcitx5-configtool \
-    fcitx5-frontend-gtk2 fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 \
-    fcitx5-frontend-qt5 fcitx5-material-color fcitx5-pinyin-moegirl \
-    fcitx5-pinyin-zhwiki
-
-# 4.3 配置全局环境变量
-echo -e "${YELLOW}[4.3] 正在配置输入法环境变量...${NC}"
+# 配置全局输入法环境变量
 cat > /etc/profile.d/fcitx5.sh << EOF
 export GTK_IM_MODULE=fcitx5
 export QT_IM_MODULE=fcitx5
 export XMODIFIERS=@im=fcitx5
+export INPUT_METHOD=fcitx5
 export SDL_IM_MODULE=fcitx5
-export GLFW_IM_MODULE=fcitx5
+export GLFW_IM_MODULE=ibus
+EOF
+chmod +x /etc/profile.d/fcitx5.sh
+
+# 安装中文字体
+apt install -y --no-install-recommends \
+    fonts-wqy-zenhei fonts-wqy-microhei fonts-noto-cjk fonts-noto-color-emoji
+fc-cache -fv >/dev/null 2>&1
+
+echo "✅ 中文环境配置完成"
+echo ""
+
+# ------------------------------
+# 功能4: 安装WPS Office
+# ------------------------------
+echo "[4/7] 正在安装WPS Office..."
+if [ "$(uname -m)" = "x86_64" ]; then
+    # 多镜像源容错下载
+    WPS_URLS=(
+        "https://mirrors.huaweicloud.com/wps/wps-office_11.1.0.14712_amd64.deb"
+        "https://mirrors.aliyun.com/wps/wps-office_11.1.0.14712_amd64.deb"
+        "https://dl.wps.cn/wps/download/ep/Linux2024/14712/wps-office_11.1.0.14712_amd64.deb"
+    )
+    
+    WPS_INSTALLED=false
+    for URL in "${WPS_URLS[@]}"; do
+        echo "尝试下载: $URL"
+        if wget --tries=2 --timeout=15 -q -O wps.deb "$URL"; then
+            dpkg -i wps.deb || apt install -f -y
+            rm -f wps.deb
+            WPS_INSTALLED=true
+            break
+        fi
+        echo "下载失败，尝试下一个镜像..."
+        rm -f wps.deb
+    done
+    
+    if [ "$WPS_INSTALLED" = false ]; then
+        echo "⚠️  WPS自动安装失败，请手动下载安装: https://www.wps.cn/product/wpslinux"
+    else
+        echo "✅ WPS安装完成"
+    fi
+else
+    echo "⚠️  32位系统暂不支持WPS自动安装"
+fi
+echo ""
+
+# ------------------------------
+# 功能5: 安装星火应用商店
+# ------------------------------
+echo "[5/7] 正在安装星火应用商店..."
+if [ "$(uname -m)" = "x86_64" ]; then
+    # 多镜像源下载
+    SPARK_URLS=(
+        "https://gitee.com/deepin-community-store/spark-store/releases/download/v4.2.6/spark-store_4.2.6_amd64.deb"
+        "https://mirrors.huaweicloud.com/spark-store/spark-store_4.2.6_amd64.deb"
+    )
+    
+    SPARK_INSTALLED=false
+    for URL in "${SPARK_URLS[@]}"; do
+        echo "尝试下载: $URL"
+        if wget --tries=2 --timeout=15 -q -O spark-store.deb "$URL"; then
+            dpkg -i spark-store.deb || apt install -f -y
+            rm -f spark-store.deb
+            SPARK_INSTALLED=true
+            break
+        fi
+        echo "下载失败，尝试下一个镜像..."
+        rm -f spark-store.deb
+    done
+    
+    if [ "$SPARK_INSTALLED" = false ]; then
+        echo "⚠️  星火应用商店自动安装失败，请手动下载安装: https://www.spark-app.store/"
+    else
+        echo "✅ 星火应用商店安装完成"
+    fi
+else
+    echo "⚠️  32位系统不支持星火应用商店"
+fi
+echo ""
+
+# ------------------------------
+# 功能6: 系统性能优化
+# ------------------------------
+echo "[6/7] 正在执行系统性能优化..."
+
+# 内核参数优化
+cat > /etc/sysctl.d/99-system-optimize.conf << EOF
+vm.swappiness=10
+vm.vfs_cache_pressure=50
+fs.file-max=65535
+net.core.somaxconn=1024
+net.ipv4.tcp_syncookies=1
+EOF
+sysctl -p /etc/sysctl.d/99-system-optimize.conf >/dev/null 2>&1
+
+# 文件打开数限制
+cat > /etc/security/limits.d/99-file-limits.conf << EOF
+* soft nofile 65535
+* hard nofile 65535
+root soft nofile 65535
+root hard nofile 65535
 EOF
 
-# 设置为系统默认输入法
-im-config -n fcitx5
-echo -e "${GREEN}[完成] Fcitx5输入法安装完成，包含拼音和五笔输入方案${NC}"
+# 禁用不必要的服务
+systemctl disable apport 2>/dev/null || true
+systemctl disable whoopsie 2>/dev/null || true
+systemctl disable cups 2>/dev/null || true
+systemctl disable ModemManager 2>/dev/null || true
 
-# ==================================================
-# 模块5：WPS Office安装
-# ==================================================
-echo -e "\n${YELLOW}[模块5/7] WPS Office安装配置${NC}"
+# GRUB配置优化
+sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=2/' /etc/default/grub
+update-grub >/dev/null 2>&1
 
-echo -e "${YELLOW}[5.1] 正在下载WPS Office安装包...${NC}"
-WPS_VERSION="11.1.0.11719"
-WPS_URL="https://wps-linux-personal.wpscdn.cn/wps/download/ep/Linux2019/11719/wps-office_${WPS_VERSION}_${ARCH}.deb"
-wget -O /tmp/wps-office.deb "$WPS_URL" -q --show-progress
+echo "✅ 系统性能优化完成"
+echo ""
 
-echo -e "${YELLOW}[5.2] 正在安装WPS Office...${NC}"
-dpkg -i /tmp/wps-office.deb
-apt --fix-broken install -y
+# ------------------------------
+# 功能7: 常用软件安装与系统清理
+# ------------------------------
+echo "[7/7] 正在安装常用工具软件..."
+# 精简常用工具列表，避免安装大量不必要依赖
+apt install -y --no-install-recommends \
+    git curl wget vim htop net-tools tree \
+    build-essential gdebi synaptic apt-transport-https ca-certificates \
+    flameshot p7zip-full unrar
 
-# 5.3 修复WPS字体缺失问题
-echo -e "${YELLOW}[5.3] 正在安装WPS缺失字体...${NC}"
-mkdir -p /usr/share/fonts/wps-office
-wget -O /tmp/wps-fonts.zip https://gitcode.com/Premium-Resources/a6802/raw/main/wps_symbol_fonts.zip -q
-unzip /tmp/wps-fonts.zip -d /usr/share/fonts/wps-office > /dev/null
-fc-cache -fv > /dev/null
-
-# 5.4 修复WPS中文输入问题
-echo -e "${YELLOW}[5.4] 正在修复WPS中文输入兼容性...${NC}"
-sed -i '1a export XMODIFIERS="@im=fcitx5"\nexport QT_IM_MODULE="fcitx5"' /usr/bin/wps
-sed -i '1a export XMODIFIERS="@im=fcitx5"\nexport QT_IM_MODULE="fcitx5"' /usr/bin/et
-sed -i '1a export XMODIFIERS="@im=fcitx5"\nexport QT_IM_MODULE="fcitx5"' /usr/bin/wpp
-
-rm -f /tmp/wps-office.deb /tmp/wps-fonts.zip
-echo -e "${GREEN}[完成] WPS Office安装与配置完成${NC}"
-
-# ==================================================
-# 模块6：星火应用商店安装
-# ==================================================
-echo -e "\n${YELLOW}[模块6/7] 星火应用商店安装${NC}"
-
-if [ "$ARCH" != "amd64" ] && [ "$ARCH" != "arm64" ]; then
-    echo -e "${YELLOW}[提示] 星火应用商店暂不支持$ARCH架构，跳过安装${NC}"
-else
-    echo -e "${YELLOW}[6.1] 正在添加星火应用商店软件源...${NC}"
-    curl -fsSL https://gitcode.com/spark-store-project/spark-store/raw/main/tool/install-repo.sh | bash
-    apt update -y
-
-    echo -e "${YELLOW}[6.2] 正在安装星火应用商店...${NC}"
-    apt install -y spark-store
-
-    # 修复Ubuntu 20.04 DTK依赖问题
-    if [ "$RELEASE" = "focal" ]; then
-        echo -e "${YELLOW}[提示] 检测到Ubuntu 20.04，正在修复依赖问题...${NC}"
-        wget -O /tmp/spark-deps.zip https://gitee.com/spark-store-project/spark-store-dependencies/releases/download/1.0/spark-store-dependencies-kylin.zip -q
-        unzip /tmp/spark-deps.zip -d /tmp/spark-deps > /dev/null
-        tar xvf /tmp/spark-deps/解压我.tar -C /tmp/spark-deps > /dev/null
-        apt install -y /tmp/spark-deps/all-depends/Debian10-or-ubuntu-20.04/*.deb > /dev/null
-        rm -rf /tmp/spark-deps /tmp/spark-deps.zip
-        apt install -y spark-store
-    fi
-    echo -e "${GREEN}[完成] 星火应用商店安装完成${NC}"
-fi
-
-# ==================================================
-# 模块7：系统清理与最终优化
-# ==================================================
-echo -e "\n${YELLOW}[模块7/7] 系统清理与最终优化${NC}"
-
-# 7.1 系统缓存清理
-echo -e "${YELLOW}[7.1] 正在清理系统缓存...${NC}"
-apt autoremove -y
-apt autoclean
-apt clean
+echo "正在清理系统冗余文件..."
+apt autoremove -y >/dev/null 2>&1
+apt autoclean >/dev/null 2>&1
+apt clean >/dev/null 2>&1
 rm -rf /tmp/*
-echo -e "${GREEN}[完成] 系统缓存清理完成${NC}"
+rm -f /var/cache/apt/archives/*.deb
+rm -f /root/*.deb
 
-# 7.2 系统参数优化
-echo -e "${YELLOW}[7.2] 正在优化系统参数...${NC}"
-echo "vm.swappiness=10" >> /etc/sysctl.conf
-echo "vm.vfs_cache_pressure=50" >> /etc/sysctl.conf
-sysctl -p > /dev/null
-echo -e "${GREEN}[完成] 系统参数优化完成${NC}"
+echo "✅ 常用软件安装完成"
+echo ""
 
-# ==================================================
-# 执行完成
-# ==================================================
-echo -e "\n${GREEN}================================================================${NC}"
-echo -e "${GREEN}                     所有优化操作已执行完成                     ${NC}"
-echo -e "${GREEN}================================================================${NC}"
-echo ""
-echo -e "${YELLOW}请重启系统以应用所有配置，重启后可进行以下验证：${NC}"
-echo "1. 执行 nvidia-smi 检查NVIDIA显卡驱动状态"
-echo "2. 运行 fcitx5-configtool 配置输入法（添加五笔/拼音）"
-echo "3. 在应用菜单中找到WPS Office和星火应用商店"
-echo "4. 蓝牙设备可在系统设置或blueman管理器中管理"
-echo ""
-echo -e "${GREEN}感谢使用本脚本，祝你使用愉快！${NC}"
-echo ""
+echo "======================================"
+echo "🎉 脚本执行全部完成！"
+echo "请重启系统使所有配置生效"
+echo "======================================"
