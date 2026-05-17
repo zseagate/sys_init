@@ -1,9 +1,9 @@
 #!/bin/bash
 # Debian系Linux系统初始化优化脚本
-# 版本: V2.0 稳定版
-# 日期: 2026-05-16
-# 适用系统: Debian/Ubuntu/MX Linux/Linux Mint/Lubuntu/Xubuntu/PeppermintOS/Zorin OS 32/64位
-# 测试验证: Debian 12 / Ubuntu 22.04 / Ubuntu 24.04 全功能通过
+# 版本: V2.1
+# 日期: 2026-05-17
+# 适用系统: Debian 12+/Debian 13+/Ubuntu 22.04+/MX Linux/Linux Mint 等全系列Debian系衍生发行版
+# 测试验证: Debian 12/Debian 13/Ubuntu 22.04/Ubuntu 24.04 全功能测试通过
 
 set -euo pipefail
 trap 'echo -e "\n错误: 脚本在第 $LINENO 行执行失败，请检查上述错误信息"' ERR
@@ -25,9 +25,77 @@ else
 fi
 
 echo "======================================"
-echo "Debian系Linux系统优化脚本 V2.0 稳定版"
+echo "Debian系Linux系统优化脚本 V2.1"
 echo "检测到系统: $PRETTY_NAME"
 echo "======================================"
+echo ""
+
+# ------------------------------
+# 新增功能: 国内镜像源自动测速与选择
+# ------------------------------
+echo "[0/7] 正在进行国内镜像源测速..."
+
+# 国内主流镜像源列表
+MIRRORS=(
+    "阿里云|https://mirrors.aliyun.com/debian|https://mirrors.aliyun.com/ubuntu"
+    "华为云|https://mirrors.huaweicloud.com/debian|https://mirrors.huaweicloud.com/ubuntu"
+    "腾讯云|https://mirrors.cloud.tencent.com/debian|https://mirrors.cloud.tencent.com/ubuntu"
+    "清华大学|https://mirrors.tuna.tsinghua.edu.cn/debian|https://mirrors.tuna.tsinghua.edu.cn/ubuntu"
+    "中科大|https://mirrors.ustc.edu.cn/debian|https://mirrors.ustc.edu.cn/ubuntu"
+    "上海交大|https://mirror.sjtu.edu.cn/debian|https://mirror.sjtu.edu.cn/ubuntu"
+)
+
+# 测速文件路径（轻量级测试文件）
+TEST_FILE="dists/$VERSION_CODENAME/Release"
+TIMEOUT=5
+BEST_MIRROR=""
+BEST_SPEED=999999
+
+# 安装必要的测速依赖
+apt update -y && apt install -y --no-install-recommends curl bc
+
+for MIRROR in "${MIRRORS[@]}"; do
+    IFS='|' read -r NAME DEBIAN_URL UBUNTU_URL <<< "$MIRROR"
+    
+    # 根据发行版选择对应URL
+    if [ "$DISTRO" = "debian" ]; then
+        TEST_URL="$DEBIAN_URL/$TEST_FILE"
+    elif [ "$DISTRO" = "ubuntu" ]; then
+        TEST_URL="$UBUNTU_URL/$TEST_FILE"
+    else
+        TEST_URL="$DEBIAN_URL/$TEST_FILE"
+    fi
+    
+    echo -n "测试 $NAME ... "
+    # 测试下载速度（仅下载头部，计算耗时）
+    START_TIME=$(date +%s.%N)
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -m $TIMEOUT "$TEST_URL" || echo "000")
+    END_TIME=$(date +%s.%N)
+    
+    if [ "$HTTP_CODE" = "200" ]; then
+        DURATION=$(echo "$END_TIME - $START_TIME" | bc -l)
+        SPEED=$(echo "scale=2; 1 / $DURATION" | bc -l)
+        echo "响应时间 $DURATION 秒"
+        
+        # 记录最快的源
+        if (( $(echo "$DURATION < $BEST_SPEED" | bc -l) )); then
+            BEST_SPEED=$DURATION
+            BEST_MIRROR="$MIRROR"
+        fi
+    else
+        echo "连接失败"
+    fi
+done
+
+if [ -z "$BEST_MIRROR" ]; then
+    echo "⚠️  所有镜像源测速失败，将使用默认阿里云源"
+    SELECTED_NAME="阿里云"
+    DEBIAN_URL="https://mirrors.aliyun.com/debian"
+    UBUNTU_URL="https://mirrors.aliyun.com/ubuntu"
+else
+    IFS='|' read -r SELECTED_NAME DEBIAN_URL UBUNTU_URL <<< "$BEST_MIRROR"
+    echo "✅ 测速完成，选择最快源: $SELECTED_NAME (响应时间 $BEST_SPEED 秒)"
+fi
 echo ""
 
 # ------------------------------
@@ -40,18 +108,18 @@ cp -a /etc/apt/sources.list /etc/apt/sources.list.backup.$(date +%Y%m%d)
 
 # 配置国内源，根据发行版自动适配
 if [ "$DISTRO" = "debian" ]; then
-    # Debian 12+ 源配置（包含non-free-firmware固件源）
+    # Debian 系列源配置
     cat > /etc/apt/sources.list << EOF
-deb https://mirrors.aliyun.com/debian/ $VERSION_CODENAME main non-free non-free-firmware contrib
-deb https://mirrors.aliyun.com/debian-security/ $VERSION_CODENAME-security main non-free non-free-firmware contrib
-deb https://mirrors.aliyun.com/debian/ $VERSION_CODENAME-updates main non-free non-free-firmware contrib
+deb $DEBIAN_URL/ $VERSION_CODENAME main non-free non-free-firmware contrib
+deb $DEBIAN_URL-security/ $VERSION_CODENAME-security main non-free non-free-firmware contrib
+deb $DEBIAN_URL/ $VERSION_CODENAME-updates main non-free non-free-firmware contrib
 EOF
 elif [ "$DISTRO" = "ubuntu" ]; then
-    # Ubuntu 20.04+ 源配置
+    # Ubuntu 系列源配置
     cat > /etc/apt/sources.list << EOF
-deb https://mirrors.aliyun.com/ubuntu/ $VERSION_CODENAME main restricted universe multiverse
-deb https://mirrors.aliyun.com/ubuntu/ $VERSION_CODENAME-security main restricted universe multiverse
-deb https://mirrors.aliyun.com/ubuntu/ $VERSION_CODENAME-updates main restricted universe multiverse
+deb $UBUNTU_URL/ $VERSION_CODENAME main restricted universe multiverse
+deb $UBUNTU_URL/ $VERSION_CODENAME-security main restricted universe multiverse
+deb $UBUNTU_URL/ $VERSION_CODENAME-updates main restricted universe multiverse
 EOF
 fi
 
@@ -289,5 +357,6 @@ echo ""
 
 echo "======================================"
 echo "🎉 脚本执行全部完成！"
+echo "本次使用最快镜像源: $SELECTED_NAME"
 echo "请重启系统使所有配置生效"
 echo "======================================"
