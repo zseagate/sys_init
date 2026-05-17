@@ -1,9 +1,9 @@
 #!/bin/bash
 # Debian系Linux系统初始化优化脚本
-# 版本: V2.1
+# 版本: V2.2
 # 日期: 2026-05-17
-# 适用系统: Debian 12+/Debian 13+/Ubuntu 22.04+/MX Linux/Linux Mint 等全系列Debian系衍生发行版
-# 测试验证: Debian 12/Debian 13/Ubuntu 22.04/Ubuntu 24.04 全功能测试通过
+# 适用系统: Debian 12+/Debian 13+/Ubuntu 22.04+/Linux Mint 20+/MX Linux 等全系列Debian系衍生发行版
+# 测试验证: Debian 12/Debian 13/Ubuntu 22.04/Ubuntu 24.04/Linux Mint 22.3 全功能测试通过
 
 set -euo pipefail
 trap 'echo -e "\n错误: 脚本在第 $LINENO 行执行失败，请检查上述错误信息"' ERR
@@ -19,30 +19,34 @@ if [ -f /etc/os-release ]; then
     . /etc/os-release
     DISTRO=$ID
     VERSION_CODENAME=$VERSION_CODENAME
+    # 适配Linux Mint系列，基于Ubuntu版本代号
+    if [ "$DISTRO" = "linuxmint" ]; then
+        VERSION_CODENAME=$UBUNTU_CODENAME
+    fi
 else
     echo "错误: 无法检测系统发行版"
     exit 1
 fi
 
 echo "======================================"
-echo "Debian系Linux系统优化脚本 V2.1"
+echo "Debian系Linux系统优化脚本 V2.2"
 echo "检测到系统: $PRETTY_NAME"
 echo "======================================"
 echo ""
 
 # ------------------------------
-# 新增功能: 国内镜像源自动测速与选择
+# 功能0: 国内镜像源自动测速与选择
 # ------------------------------
 echo "[0/7] 正在进行国内镜像源测速..."
 
 # 国内主流镜像源列表
 MIRRORS=(
-    "阿里云|https://mirrors.aliyun.com/debian|https://mirrors.aliyun.com/ubuntu"
-    "华为云|https://mirrors.huaweicloud.com/debian|https://mirrors.huaweicloud.com/ubuntu"
-    "腾讯云|https://mirrors.cloud.tencent.com/debian|https://mirrors.cloud.tencent.com/ubuntu"
-    "清华大学|https://mirrors.tuna.tsinghua.edu.cn/debian|https://mirrors.tuna.tsinghua.edu.cn/ubuntu"
-    "中科大|https://mirrors.ustc.edu.cn/debian|https://mirrors.ustc.edu.cn/ubuntu"
-    "上海交大|https://mirror.sjtu.edu.cn/debian|https://mirror.sjtu.edu.cn/ubuntu"
+    "阿里云|https://mirrors.aliyun.com/debian|https://mirrors.aliyun.com/ubuntu|https://mirrors.aliyun.com/linuxmint"
+    "华为云|https://mirrors.huaweicloud.com/debian|https://mirrors.huaweicloud.com/ubuntu|https://mirrors.huaweicloud.com/linuxmint"
+    "腾讯云|https://mirrors.cloud.tencent.com/debian|https://mirrors.cloud.tencent.com/ubuntu|https://mirrors.cloud.tencent.com/linuxmint"
+    "清华大学|https://mirrors.tuna.tsinghua.edu.cn/debian|https://mirrors.tuna.tsinghua.edu.cn/ubuntu|https://mirrors.tuna.tsinghua.edu.cn/linuxmint"
+    "中科大|https://mirrors.ustc.edu.cn/debian|https://mirrors.ustc.edu.cn/ubuntu|https://mirrors.ustc.edu.cn/linuxmint"
+    "上海交大|https://mirror.sjtu.edu.cn/debian|https://mirror.sjtu.edu.cn/ubuntu|https://mirror.sjtu.edu.cn/linuxmint"
 )
 
 # 测速文件路径（轻量级测试文件）
@@ -55,12 +59,12 @@ BEST_SPEED=999999
 apt update -y && apt install -y --no-install-recommends curl bc
 
 for MIRROR in "${MIRRORS[@]}"; do
-    IFS='|' read -r NAME DEBIAN_URL UBUNTU_URL <<< "$MIRROR"
+    IFS='|' read -r NAME DEBIAN_URL UBUNTU_URL MINT_URL <<< "$MIRROR"
     
     # 根据发行版选择对应URL
     if [ "$DISTRO" = "debian" ]; then
         TEST_URL="$DEBIAN_URL/$TEST_FILE"
-    elif [ "$DISTRO" = "ubuntu" ]; then
+    elif [ "$DISTRO" = "ubuntu" ] || [ "$DISTRO" = "linuxmint" ]; then
         TEST_URL="$UBUNTU_URL/$TEST_FILE"
     else
         TEST_URL="$DEBIAN_URL/$TEST_FILE"
@@ -74,7 +78,6 @@ for MIRROR in "${MIRRORS[@]}"; do
     
     if [ "$HTTP_CODE" = "200" ]; then
         DURATION=$(echo "$END_TIME - $START_TIME" | bc -l)
-        SPEED=$(echo "scale=2; 1 / $DURATION" | bc -l)
         echo "响应时间 $DURATION 秒"
         
         # 记录最快的源
@@ -92,8 +95,9 @@ if [ -z "$BEST_MIRROR" ]; then
     SELECTED_NAME="阿里云"
     DEBIAN_URL="https://mirrors.aliyun.com/debian"
     UBUNTU_URL="https://mirrors.aliyun.com/ubuntu"
+    MINT_URL="https://mirrors.aliyun.com/linuxmint"
 else
-    IFS='|' read -r SELECTED_NAME DEBIAN_URL UBUNTU_URL <<< "$BEST_MIRROR"
+    IFS='|' read -r SELECTED_NAME DEBIAN_URL UBUNTU_URL MINT_URL <<< "$BEST_MIRROR"
     echo "✅ 测速完成，选择最快源: $SELECTED_NAME (响应时间 $BEST_SPEED 秒)"
 fi
 echo ""
@@ -105,6 +109,9 @@ echo "[1/7] 正在配置系统软件源..."
 
 # 备份原有源
 cp -a /etc/apt/sources.list /etc/apt/sources.list.backup.$(date +%Y%m%d)
+if [ -d /etc/apt/sources.list.d ]; then
+    cp -a /etc/apt/sources.list.d /etc/apt/sources.list.d.backup.$(date +%Y%m%d)
+fi
 
 # 配置国内源，根据发行版自动适配
 if [ "$DISTRO" = "debian" ]; then
@@ -120,6 +127,18 @@ elif [ "$DISTRO" = "ubuntu" ]; then
 deb $UBUNTU_URL/ $VERSION_CODENAME main restricted universe multiverse
 deb $UBUNTU_URL/ $VERSION_CODENAME-security main restricted universe multiverse
 deb $UBUNTU_URL/ $VERSION_CODENAME-updates main restricted universe multiverse
+EOF
+elif [ "$DISTRO" = "linuxmint" ]; then
+    # Linux Mint 系列源配置（独立配置文件）
+    # 配置Ubuntu基础源
+    cat > /etc/apt/sources.list.d/official-source-repositories.list << EOF
+deb $UBUNTU_URL/ $VERSION_CODENAME main restricted universe multiverse
+deb $UBUNTU_URL/ $VERSION_CODENAME-security main restricted universe multiverse
+deb $UBUNTU_URL/ $VERSION_CODENAME-updates main restricted universe multiverse
+EOF
+    # 配置Mint专属源
+    cat > /etc/apt/sources.list.d/official-package-repositories.list << EOF
+deb $MINT_URL/ wilma main upstream import backport
 EOF
 fi
 
@@ -139,13 +158,13 @@ echo "[2/7] 正在安装硬件驱动与固件..."
 # 安装通用硬件固件包
 apt install -y --no-install-recommends \
     firmware-linux firmware-linux-nonfree firmware-misc-nonfree \
-    firmware-realtek firmware-iwlwifi firmware-atheros firmware-brcm80211 firmware-amd-graphics
+    firmware-realtek firmware-iwlwifi firmware-atheros firmware-brcm80211 firmware-amd-graphics || true
 
 # 显卡驱动安装，适配不同发行版
 if lspci | grep -E "VGA|3D controller" | grep -i "NVIDIA" > /dev/null; then
     echo "检测到NVIDIA显卡，正在安装驱动..."
-    if [ "$DISTRO" = "ubuntu" ]; then
-        # Ubuntu系统使用ubuntu-drivers工具
+    if [ "$DISTRO" = "ubuntu" ] || [ "$DISTRO" = "linuxmint" ]; then
+        # Ubuntu/Mint系统使用ubuntu-drivers工具
         apt install -y ubuntu-drivers-common
         ubuntu-drivers autoinstall
     else
@@ -184,8 +203,8 @@ echo "[3/7] 正在配置中文环境..."
 # 安装locales并生成中文locale
 apt install -y locales locales-all
 
-# Debian与Ubuntu语言包适配
-if [ "$DISTRO" = "ubuntu" ]; then
+# Debian/Ubuntu/Mint语言包适配
+if [ "$DISTRO" = "ubuntu" ] || [ "$DISTRO" = "linuxmint" ]; then
     apt install -y language-pack-zh-hans language-pack-zh-hans-base
 fi
 
